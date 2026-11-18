@@ -135,6 +135,32 @@ class AdminCatalogController(
         return ApiResponse.ok(Unit, "Produto removido do catálogo canônico.")
     }
 
+    @GetMapping("/{ean}/media")
+    @Operation(summary = "Obter preview da foto do produto (canônica ou fallback de casa)")
+    fun getMediaPreview(@PathVariable ean: String): ResponseEntity<ByteArray> {
+        val media = adminCatalogService.getMediaPreview(ean)
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(media.contentType))
+            .header("X-Media-Origin", media.origin)
+            .eTag("\"${media.sha256Hash}\"")
+            .body(media.imageBytes)
+    }
+
+    @PostMapping("/{ean}/media/promote")
+    @Operation(summary = "Promover foto enviada por usuário como foto canônica global")
+    fun promoteMedia(
+        @PathVariable ean: String,
+        @AuthenticationPrincipal jwt: Jwt?,
+        httpRequest: HttpServletRequest
+    ): ApiResponse<AdminProductMediaUploadResponseDto> {
+        val promoted = adminCatalogService.promoteHouseholdMediaToCanonical(
+            ean = ean,
+            adminUsername = jwt?.subject ?: "admin",
+            clientIp = resolveClientIp(httpRequest)
+        )
+        return ApiResponse.ok(promoted, "Foto promovida para o catálogo canônico.")
+    }
+
     @PutMapping("/{ean}/media", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     @Operation(summary = "Enviar ou substituir foto canônica do produto (WebP/JPEG/PNG até 500KB)")
     fun uploadMedia(

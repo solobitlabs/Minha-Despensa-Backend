@@ -25,8 +25,11 @@ package com.bitlabbr.minhadespensa.modules.catalog.repository
 
 import com.bitlabbr.minhadespensa.modules.catalog.entity.ProductMediaEntity
 import com.bitlabbr.minhadespensa.modules.catalog.entity.ProductMediaId
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import java.util.Optional
 
@@ -36,4 +39,30 @@ interface ProductMediaRepository : JpaRepository<ProductMediaEntity, ProductMedi
 
     @Modifying
     fun deleteByHouseholdIdAndProductId(householdId: String, productId: String): Int
+
+    @Query(
+        """
+        SELECT p.ean, pm.sha256Hash
+        FROM ProductEntity p, ProductMediaEntity pm
+        WHERE p.householdId = pm.householdId
+          AND p.id = pm.productId
+          AND p.isDeleted = false
+          AND p.ean IN :eans
+        ORDER BY pm.updatedAt DESC
+        """
+    )
+    fun findMediaHashesByEans(@Param("eans") eans: List<String>): List<Array<Any>>
+
+    @Query(
+        """
+        SELECT pm
+        FROM ProductEntity p, ProductMediaEntity pm
+        WHERE p.householdId = pm.householdId
+          AND p.id = pm.productId
+          AND p.isDeleted = false
+          AND p.ean = :ean
+        ORDER BY pm.updatedAt DESC
+        """
+    )
+    fun findLatestMediaByEan(@Param("ean") ean: String, pageable: Pageable): List<ProductMediaEntity>
 }

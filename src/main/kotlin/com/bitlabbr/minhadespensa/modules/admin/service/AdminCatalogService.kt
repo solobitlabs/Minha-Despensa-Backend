@@ -37,6 +37,7 @@ import com.bitlabbr.minhadespensa.modules.catalog.entity.GlobalProductEntity
 import com.bitlabbr.minhadespensa.modules.catalog.entity.GlobalProductMediaEntity
 import com.bitlabbr.minhadespensa.modules.catalog.repository.GlobalProductMediaRepository
 import com.bitlabbr.minhadespensa.modules.catalog.repository.GlobalProductRepository
+import com.bitlabbr.minhadespensa.modules.catalog.repository.ProductMediaRepository
 import com.bitlabbr.minhadespensa.modules.catalog.service.GlobalProductService
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
@@ -52,7 +53,9 @@ class AdminCatalogService(
     private val globalProductService: GlobalProductService,
     private val adminAuditService: AdminAuditService,
     @Autowired(required = false)
-    private val openFactsCatalogClient: OpenFactsCatalogClient? = null
+    private val openFactsCatalogClient: OpenFactsCatalogClient? = null,
+    @Autowired(required = false)
+    private val productMediaRepository: ProductMediaRepository? = null
 ) {
     private val logger = LoggerFactory.getLogger(AdminCatalogService::class.java)
 
@@ -82,12 +85,85 @@ class AdminCatalogService(
             pageable = pageable
         )
 
+        val missingHashEans = resultPage.content
+            .filter { it.imageHash == null }
+            .map { it.ean }
+
+        val fallbackHashes = if (missingHashEans.isNotEmpty() && productMediaRepository != null) {
+            productMediaRepository.findMediaHashesByEans(missingHashEans)
+                .mapNotNull { row ->
+                    val ean = row.getOrNull(0) as? String
+                    val hash = row.getOrNull(1) as? String
+                    if (ean != null && hash != null) ean to hash else null
+                }
+                .toMap()
+        } else {
+            emptyMap()
+        }
+
+        val items = resultPage.content.map { entity ->
+            val dto = GlobalProductResponseDto.fromEntity(entity)
+            if (dto.imageHash == null && fallbackHashes.containsKey(dto.ean)) {
+                dto.copy(imageHash = fallbackHashes[dto.ean])
+            } else {
+                dto
+            }
+        }
+
         return AdminPagedResponseDto(
-            items = resultPage.content.map { GlobalProductResponseDto.fromEntity(it) },
+            items = items,
             page = resultPage.number,
             size = resultPage.size,
             totalElements = resultPage.totalElements,
             totalPages = resultPage.totalPages
+        )
+    }
+
+    data class AdminMediaPreview(
+        val contentType: String,
+        val sha256Hash: String,
+        val imageBytes: ByteArray,
+        val origin: String
+    )
+
+    @Transactional(readOnly = true)
+    fun getMediaPreview(ean: String): AdminMediaPreview {
+        val cleanEan = ean.trim()
+        val canonicalOpt = globalProductMediaRepository.findById(cleanEan)
+        if (canonicalOpt.isPresent) {
+            val m = canonicalOpt.get()
+            return AdminMediaPreview(m.contentType, m.sha256Hash, m.imageBytes, "CANONICAL")
+        }
+
+        if (productMediaRepository != null) {
+            val householdMedia = productMediaRepository.findLatestMediaByEan(cleanEan, PageRequest.of(0, 1))
+            if (householdMedia.isNotEmpty()) {
+                val m = householdMedia.first()
+                return AdminMediaPreview(m.contentType, m.sha256Hash, m.imageBytes, "HOUSEHOLD_FALLBACK")
+            }
+        }
+
+        throw ResourceNotFoundException("Nenhuma foto encontrada para o EAN '$cleanEan'.")
+    }
+
+    @Transactional
+    fun promoteHouseholdMediaToCanonical(
+        ean: String,
+        adminUsername: String,
+        clientIp: String?
+    ): AdminProductMediaUploadResponseDto {
+        val cleanEan = ean.trim()
+        val repo = productMediaRepository
+            ?: throw ResourceNotFoundException("Repositório de mídia das casas indisponível.")
+        val householdMedia = repo.findLatestMediaByEan(cleanEan, PageRequest.of(0, 1)).firstOrNull()
+            ?: throw ResourceNotFoundException("Nenhuma foto de usuário encontrada para o EAN '$cleanEan'.")
+
+        return uploadMedia(
+            ean = cleanEan,
+            contentType = householdMedia.contentType,
+            bytes = householdMedia.imageBytes,
+            adminUsername = adminUsername,
+            clientIp = clientIp
         )
     }
 

@@ -165,7 +165,27 @@ class AdminWebViewController {
     .badge.warn { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
     .badge.err { background: rgba(239, 68, 68, 0.18); color: #f87171; }
     .actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .thumb { width: 38px; height: 38px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: #0f172a; }
+    .thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; }
+    .thumb-placeholder { width: 42px; height: 42px; border-radius: 8px; border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+    tr.clickable-row { cursor: pointer; transition: background .12s; }
+    tr.clickable-row:hover { background: rgba(56, 189, 248, 0.08); }
+    .modal-photo-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.65);
+    }
+    .modal-photo-preview {
+      max-width: 100%;
+      max-height: 170px;
+      border-radius: 8px;
+      object-fit: contain;
+    }
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -314,7 +334,13 @@ class AdminWebViewController {
 
   <div id="productModal" class="modal-backdrop hidden">
     <div class="card modal">
-      <h3 id="modalTitle">Editar Produto Canônico</h3>
+      <h3 id="modalTitle">Detalhes & Sanitização do Produto</h3>
+      <div id="modalMeta" class="muted" style="margin-bottom:10px;"></div>
+      <div id="modalPhotoBox" class="modal-photo-box hidden">
+        <img id="mPhotoPreview" class="modal-photo-preview hidden" alt="Foto do produto" />
+        <span id="mPhotoEmpty" class="muted">Sem foto cadastrada</span>
+        <span id="mPhotoOrigin" class="badge hidden"></span>
+      </div>
       <form id="productForm">
         <label for="mEan">Código EAN</label>
         <input id="mEan" type="text" required />
@@ -350,6 +376,7 @@ class AdminWebViewController {
           <input id="mPhotoFile" type="file" accept="image/webp,image/jpeg,image/png" />
           <div class="actions" style="margin-top:8px;">
             <button type="button" id="uploadPhotoBtn" class="secondary">Enviar Foto</button>
+            <button type="button" id="promotePhotoBtn" class="success hidden">Promover Foto da Casa</button>
             <button type="button" id="removePhotoBtn" class="danger">Remover Foto</button>
           </div>
         </div>
@@ -461,18 +488,24 @@ class AdminWebViewController {
 
       for (const p of res.data.items) {
         const tr = document.createElement("tr");
+        tr.className = "clickable-row";
+        tr.addEventListener("click", (e) => {
+          if (e.target.closest("button")) return;
+          openEditModal(p);
+        });
 
         const tdImg = document.createElement("td");
         if (p.imageHash) {
           const img = document.createElement("img");
           img.className = "thumb";
-          loadAuthorizedThumb(p.ean, img);
+          img.alt = p.name;
+          loadAuthorizedThumb(p.ean, p.imageHash, img);
           tdImg.appendChild(img);
         } else {
-          const span = document.createElement("span");
-          span.className = "muted";
-          span.textContent = "—";
-          tdImg.appendChild(span);
+          const ph = document.createElement("div");
+          ph.className = "thumb-placeholder";
+          ph.textContent = "—";
+          tdImg.appendChild(ph);
         }
 
         const tdEan = document.createElement("td");
@@ -525,14 +558,48 @@ class AdminWebViewController {
       }
     }
 
-    async function loadAuthorizedThumb(ean, imgEl) {
+    async function loadAuthorizedThumb(ean, hash, imgEl) {
       try {
-        const res = await fetch("/api/v1/catalog/global/" + encodeURIComponent(ean) + "/media", {
+        const res = await fetch("/api/v1/admin/products/" + encodeURIComponent(ean) + "/media?v=" + encodeURIComponent(hash || ""), {
           headers: { "Authorization": "Bearer " + getToken() }
         });
         if (res.ok) {
           const blob = await res.blob();
           imgEl.src = URL.createObjectURL(blob);
+        }
+      } catch (_) {}
+    }
+
+    async function loadModalPhotoPreview(ean) {
+      const box = document.getElementById("modalPhotoBox");
+      const img = document.getElementById("mPhotoPreview");
+      const empty = document.getElementById("mPhotoEmpty");
+      const originBadge = document.getElementById("mPhotoOrigin");
+      const promoteBtn = document.getElementById("promotePhotoBtn");
+
+      box.classList.remove("hidden");
+      img.classList.add("hidden");
+      img.removeAttribute("src");
+      empty.classList.remove("hidden");
+      originBadge.classList.add("hidden");
+      promoteBtn.classList.add("hidden");
+
+      try {
+        const res = await fetch("/api/v1/admin/products/" + encodeURIComponent(ean) + "/media?t=" + Date.now(), {
+          headers: { "Authorization": "Bearer " + getToken() }
+        });
+        if (res.ok) {
+          const origin = res.headers.get("X-Media-Origin") || "CANONICAL";
+          const blob = await res.blob();
+          img.src = URL.createObjectURL(blob);
+          img.classList.remove("hidden");
+          empty.classList.add("hidden");
+          originBadge.textContent = origin === "CANONICAL" ? "Foto Canônica" : "Foto de Casa (Sugestão)";
+          originBadge.className = "badge " + (origin === "CANONICAL" ? "ok" : "warn");
+          originBadge.classList.remove("hidden");
+          if (origin !== "CANONICAL") {
+            promoteBtn.classList.remove("hidden");
+          }
         }
       } catch (_) {}
     }
@@ -593,7 +660,9 @@ class AdminWebViewController {
 
     function openEditModal(p) {
       isCreating = false;
-      document.getElementById("modalTitle").textContent = "Sanitizar Produto Canônico";
+      document.getElementById("modalTitle").textContent = "Detalhes & Sanitização do Produto";
+      document.getElementById("modalMeta").textContent =
+        "Fonte: " + p.source + " • Ocorrências: " + p.occurrenceCount + " • Atualizado: " + new Date(p.updatedAt).toLocaleString("pt-BR");
       const eanInput = document.getElementById("mEan");
       eanInput.value = p.ean;
       eanInput.disabled = true;
@@ -603,13 +672,17 @@ class AdminWebViewController {
       document.getElementById("mUnit").value = p.measureUnit;
       document.getElementById("mWeight").value = p.netWeight;
       document.getElementById("mVerified").checked = true;
+      document.getElementById("mPhotoFile").value = "";
       document.getElementById("mediaSection").classList.remove("hidden");
       document.getElementById("productModal").classList.remove("hidden");
+      loadModalPhotoPreview(p.ean);
     }
 
     document.getElementById("newProdBtn").addEventListener("click", () => {
       isCreating = true;
       document.getElementById("modalTitle").textContent = "Novo Produto Canônico";
+      document.getElementById("modalMeta").textContent = "";
+      document.getElementById("modalPhotoBox").classList.add("hidden");
       const eanInput = document.getElementById("mEan");
       eanInput.value = "";
       eanInput.disabled = false;
@@ -671,6 +744,17 @@ class AdminWebViewController {
       try {
         await apiFetch("/api/v1/admin/products/" + encodeURIComponent(ean) + "/media", { method: "PUT", body: fd });
         showNotice("Foto canônica atualizada.", false);
+        await loadModalPhotoPreview(ean);
+        loadAll();
+      } catch (err) { showNotice(err.message, true); }
+    });
+
+    document.getElementById("promotePhotoBtn").addEventListener("click", async () => {
+      const ean = document.getElementById("mEan").value.trim();
+      try {
+        await apiFetch("/api/v1/admin/products/" + encodeURIComponent(ean) + "/media/promote", { method: "POST" });
+        showNotice("Foto promovida para o catálogo canônico.", false);
+        await loadModalPhotoPreview(ean);
         loadAll();
       } catch (err) { showNotice(err.message, true); }
     });
@@ -680,6 +764,7 @@ class AdminWebViewController {
       try {
         await apiFetch("/api/v1/admin/products/" + encodeURIComponent(ean) + "/media", { method: "DELETE" });
         showNotice("Foto canônica removida.", false);
+        await loadModalPhotoPreview(ean);
         loadAll();
       } catch (err) { showNotice(err.message, true); }
     });
