@@ -2,7 +2,7 @@
 
 > **Versão:** 2.3.0  
 > **Última Atualização:** 18/11/2026  
-> **Ambiente de Produção:** Domus Home Server (`https://despensa.domus.arpa`)  
+> **Ambiente de Produção:** Domus Home Server (`https://despensa.solobit.com.br`)  
 > **Repositório:** `Minha-Despensa-Backend`  
 > **Cliente Integrado:** [Minha-Dispensa (Compose Multiplatform / Room)](../Minha-Dispensa)
 
@@ -23,7 +23,7 @@ flowchart TD
     end
 
     subgraph Network["Infraestrutura Domus (Tailscale + Traefik)"]
-        Traefik["Traefik v3.0 (Reverse Proxy)<br/>https://despensa.domus.arpa"]
+        Traefik["Traefik v3.0 (Reverse Proxy)<br/>https://despensa.solobit.com.br"]
     end
 
     subgraph Backend["Minha Despensa Backend (Spring Boot 4 / Kotlin)"]
@@ -194,13 +194,13 @@ Quando um dispositivo envia um produto no Push:
 
 ```mermaid
 flowchart LR
-    Tailscale["Tailscale Mesh VPN<br/>(*.domus.arpa)"] --> Traefik["Traefik v3.0 Container<br/>(:80, :443)"]
-    Traefik -- "despensa.domus.arpa (HTTPS)" --> DespensaApp["Container: despensa_api<br/>(Spring Boot :8080)"]
+    Tailscale["Tailscale Mesh VPN / Cloud<br/>(*.solobit.com.br)"] --> Traefik["Traefik v3.0 Container<br/>(:80, :443)"]
+    Traefik -- "despensa.solobit.com.br (HTTPS)" --> DespensaApp["Container: despensa_api<br/>(Spring Boot :8080)"]
     DespensaApp -- "traefik_proxy network" --> Postgres["Container: postgres<br/>(PostgreSQL 15 :5432)"]
 ```
 
 - **Host SSH:** `domus-vpn` (`100.98.199.97`, usuário `willjsan`)
-- **DNS / Domínio:** `https://despensa.domus.arpa`
+- **DNS / Domínio:** `https://despensa.solobit.com.br` (legado interno: `https://despensa.domus.arpa`)
 - **Proxy Reverso:** Traefik v3.0 escutando em `websecure` (:443) com roteamento para `http://despensa_api:8080`.
 - **Banco de Dados:** PostgreSQL 15 (`despensa_user` / `despensa`).
 - **Migrações:** Flyway (`V1__init_multi_tenant_schema.sql`, `V2__init_support_and_bug_reports.sql`, `V3__init_global_catalog_schema.sql`).

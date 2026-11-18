@@ -47,7 +47,7 @@ class AppReleaseServiceTest {
     fun setUp() {
         appReleaseService = AppReleaseService(
             storagePath = tempDir.toString(),
-            baseDownloadUrl = "https://despensa.domus.arpa/api/v1/app/download",
+            baseDownloadUrl = "https://despensa.solobit.com.br/api/v1/app/download",
             objectMapper = objectMapper
         )
     }
@@ -79,7 +79,7 @@ class AppReleaseServiceTest {
         assertEquals(2000L, result.minRequiredVersion)
         assertEquals("Melhorias de sync e nova tela.", result.releaseNotes)
         assertEquals("abc123sha", result.sha256Checksum)
-        assertEquals("https://despensa.domus.arpa/api/v1/app/download/latest", result.downloadUrl)
+        assertEquals("https://despensa.solobit.com.br/api/v1/app/download/latest", result.downloadUrl)
     }
 
     @Test

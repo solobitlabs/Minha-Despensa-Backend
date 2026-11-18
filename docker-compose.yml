@@ -15,7 +15,7 @@ services:
       - tailscale_proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.despensa.rule=Host(`despensa.domus.arpa`)"
+      - "traefik.http.routers.despensa.rule=Host(`despensa.solobit.com.br`) || Host(`despensa.domus.arpa`)"
       - "traefik.http.routers.despensa.entrypoints=web"
       - "traefik.http.services.despensa.loadbalancer.server.port=8080"
 
