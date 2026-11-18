@@ -26,9 +26,16 @@ package com.bitlabbr.minhadespensa.modules.catalog.service
 import com.bitlabbr.minhadespensa.common.exception.ResourceNotFoundException
 import com.bitlabbr.minhadespensa.common.exception.ValidationException
 import com.bitlabbr.minhadespensa.common.util.DeterministicIdUtils
+import com.bitlabbr.minhadespensa.modules.catalog.client.ExternalCatalogProduct
+import com.bitlabbr.minhadespensa.modules.catalog.client.OpenFactsCatalogClient
 import com.bitlabbr.minhadespensa.modules.catalog.domain.MeasureUnit
 import com.bitlabbr.minhadespensa.modules.catalog.entity.GlobalProductEntity
+import com.bitlabbr.minhadespensa.modules.catalog.entity.ProductEntity
 import com.bitlabbr.minhadespensa.modules.catalog.repository.GlobalProductRepository
+import com.bitlabbr.minhadespensa.modules.catalog.repository.ProductRepository
+import com.bitlabbr.minhadespensa.modules.household.domain.HouseholdRole
+import com.bitlabbr.minhadespensa.modules.household.security.HouseholdContext
+import com.bitlabbr.minhadespensa.modules.household.service.HouseholdService
 import com.bitlabbr.minhadespensa.modules.invoice.dto.InvoiceItemResponseDto
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -49,26 +56,37 @@ import java.util.Optional
 class GlobalProductServiceTest {
 
     private lateinit var globalProductRepository: GlobalProductRepository
+    private lateinit var openFactsCatalogClient: OpenFactsCatalogClient
+    private lateinit var productRepository: ProductRepository
+    private lateinit var householdService: HouseholdService
     private lateinit var globalProductService: GlobalProductService
 
     @BeforeEach
     fun setUp() {
         globalProductRepository = mock()
-        globalProductService = GlobalProductService(globalProductRepository)
+        openFactsCatalogClient = mock()
+        productRepository = mock()
+        householdService = mock()
+        globalProductService = GlobalProductService(
+            globalProductRepository = globalProductRepository,
+            openFactsCatalogClient = openFactsCatalogClient,
+            productRepository = productRepository,
+            householdService = householdService
+        )
     }
 
     @Test
-    fun `getProductByEan should return DTO when product exists`() {
+    fun `getProductByEan should return canonical DTO when product exists in global_products`() {
         val entity = GlobalProductEntity(
             id = "global-1",
             ean = "7891000100103",
             name = "Leite Condensado Moça",
             normalizedName = "leite condensado moca",
             brand = "Nestlé",
-            category = "Laticínios",
+            category = "Outros",
             measureUnit = MeasureUnit.GRAM,
             netWeight = 395.0,
-            source = "USER_SYNC",
+            source = "OPEN_FOOD_FACTS",
             occurrenceCount = 5L
         )
         whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.of(entity))
@@ -79,15 +97,89 @@ class GlobalProductServiceTest {
         assertEquals("7891000100103", result.ean)
         assertEquals("Leite Condensado Moça", result.name)
         assertEquals("Nestlé", result.brand)
-        assertEquals("Laticínios", result.category)
+        assertEquals("Outros", result.category)
         assertEquals(MeasureUnit.GRAM, result.measureUnit)
         assertEquals(395.0, result.netWeight)
         assertEquals(5L, result.occurrenceCount)
+        verify(openFactsCatalogClient, never()).lookupByEan(any())
     }
 
     @Test
-    fun `getProductByEan should throw ResourceNotFoundException when product does not exist`() {
+    fun `getProductByEan should query OpenFactsCatalogClient on cache miss, persist canonical product and return it`() {
         whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.empty())
+        whenever(openFactsCatalogClient.lookupByEan("7891000100103")).thenReturn(
+            ExternalCatalogProduct(
+                ean = "7891000100103",
+                name = "Sabão A",
+                brand = "Marca X",
+                measureUnit = MeasureUnit.GRAM,
+                netWeight = 500.0,
+                source = "OPEN_PRODUCTS_FACTS"
+            )
+        )
+        whenever(globalProductRepository.save(any<GlobalProductEntity>())).thenAnswer { it.arguments[0] }
+
+        val result = globalProductService.getProductByEan("7891000100103")
+
+        assertEquals("Sabão A", result.name)
+        assertEquals("Marca X", result.brand)
+        assertEquals("OPEN_PRODUCTS_FACTS", result.source)
+        assertEquals(MeasureUnit.GRAM, result.measureUnit)
+        assertEquals(500.0, result.netWeight)
+        verify(openFactsCatalogClient).lookupByEan("7891000100103")
+        verify(globalProductRepository).save(any<GlobalProductEntity>())
+    }
+
+    @Test
+    fun `getProductByEan with X-Household-Id should return user customized version for owner house and canonical for another house`() {
+        val ean = "7891000100123"
+        val userAProduct = ProductEntity(
+            householdId = "house-a",
+            id = "prod-a",
+            ean = ean,
+            name = "Sabão AAAA",
+            normalizedName = "sabao aaaa",
+            category = "Limpeza",
+            brand = "Marca X",
+            measureUnit = MeasureUnit.GRAM,
+            netWeight = 500.0
+        )
+        val canonicalEntity = GlobalProductEntity(
+            id = DeterministicIdUtils.productIdForEan(ean),
+            ean = ean,
+            name = "Sabão A",
+            normalizedName = "sabao a",
+            brand = "Marca X",
+            category = "Outros",
+            measureUnit = MeasureUnit.GRAM,
+            netWeight = 500.0,
+            source = "OPEN_PRODUCTS_FACTS"
+        )
+
+        whenever(householdService.requireHouseholdAccess("user-a", "house-a"))
+            .thenReturn(HouseholdContext("house-a", "user-a", HouseholdRole.OWNER))
+        whenever(householdService.requireHouseholdAccess("user-b", "house-b"))
+            .thenReturn(HouseholdContext("house-b", "user-b", HouseholdRole.OWNER))
+
+        whenever(productRepository.findByHouseholdIdAndEanAndIsDeletedFalse("house-a", ean))
+            .thenReturn(Optional.of(userAProduct))
+        whenever(productRepository.findByHouseholdIdAndEanAndIsDeletedFalse("house-b", ean))
+            .thenReturn(Optional.empty())
+        whenever(globalProductRepository.findByEan(ean)).thenReturn(Optional.of(canonicalEntity))
+
+        val resultForUserA = globalProductService.getProductByEan(ean, userId = "user-a", householdId = "house-a")
+        val resultForUserB = globalProductService.getProductByEan(ean, userId = "user-b", householdId = "house-b")
+
+        assertEquals("Sabão AAAA", resultForUserA.name)
+        assertEquals("HOUSEHOLD_CATALOG", resultForUserA.source)
+        assertEquals("Sabão A", resultForUserB.name)
+        assertEquals("OPEN_PRODUCTS_FACTS", resultForUserB.source)
+    }
+
+    @Test
+    fun `getProductByEan should throw ResourceNotFoundException when product does not exist locally or externally`() {
+        whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.empty())
+        whenever(openFactsCatalogClient.lookupByEan("7891000100103")).thenReturn(null)
 
         assertThrows<ResourceNotFoundException> {
             globalProductService.getProductByEan("7891000100103")
@@ -181,127 +273,121 @@ class GlobalProductServiceTest {
     }
 
     @Test
-    fun `ingestFromUserProduct should enrich brand, measureUnit, override SEFAZ_INVOICE name and keep fixed category Outros`() {
-        val existingFromSefaz = GlobalProductEntity(
+    fun `ingestFromUserProduct should NOT overwrite canonical name from OPEN_FOOD_FACTS or SEFAZ_INVOICE`() {
+        val existingCanonical = GlobalProductEntity(
             id = DeterministicIdUtils.productIdForEan("7891000100103"),
             ean = "7891000100103",
-            name = "LEIT COND MOCA NESTLE LATA",
-            normalizedName = "leit cond moca nestle lata",
+            name = "Sabão A",
+            normalizedName = "sabao a",
             brand = null,
             category = "Outros",
-            measureUnit = MeasureUnit.UNIT,
-            netWeight = 1.0,
-            source = "SEFAZ_INVOICE",
+            measureUnit = MeasureUnit.GRAM,
+            netWeight = 500.0,
+            source = "OPEN_PRODUCTS_FACTS",
             occurrenceCount = 4L
         )
-        whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.of(existingFromSefaz))
+        whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.of(existingCanonical))
         whenever(globalProductRepository.save(any<GlobalProductEntity>())).thenAnswer { it.arguments[0] }
 
         val saved = globalProductService.ingestFromUserProduct(
             ean = "7891000100103",
-            name = "Leite Condensado Moça",
-            brand = "Nestlé",
-            category = "Coisinhas Customizadas da Casa",
-            measureUnit = MeasureUnit.GRAM,
-            netWeight = 395.0
+            name = "Sabão AAAA",
+            brand = "Marca X",
+            category = "Limpeza",
+            measureUnit = MeasureUnit.UNIT,
+            netWeight = 1.0
         )
 
         assertNotNull(saved)
-        assertEquals("Leite Condensado Moça", saved!!.name)
-        assertEquals("leite condensado moca", saved.normalizedName)
-        assertEquals("Nestlé", saved.brand)
-        assertEquals("Outros", saved.category)
+        assertEquals("Sabão A", saved!!.name)
+        assertEquals("sabao a", saved.normalizedName)
+        assertEquals("OPEN_PRODUCTS_FACTS", saved.source)
+        assertEquals("Marca X", saved.brand)
         assertEquals(MeasureUnit.GRAM, saved.measureUnit)
-        assertEquals(395.0, saved.netWeight)
-        assertEquals("USER_SYNC", saved.source)
+        assertEquals(500.0, saved.netWeight)
         assertEquals(5L, saved.occurrenceCount)
     }
 
     @Test
-    fun `ingestFromInvoiceItem should NOT overwrite curated USER_SYNC name even if SEFAZ description is longer`() {
-        val existingFromUser = GlobalProductEntity(
-            id = "global-1",
+    fun `ingestFromExternalCatalog should promote and overwrite initial USER_SYNC entry with canonical data`() {
+        val existingUserInitial = GlobalProductEntity(
+            id = DeterministicIdUtils.productIdForEan("7891000100103"),
             ean = "7891000100103",
-            name = "Leite Integral Piracanjuba",
-            normalizedName = "leite integral piracanjuba",
-            brand = "Piracanjuba",
-            category = "Laticínios",
-            measureUnit = MeasureUnit.LITER,
+            name = "Sabão AAAA",
+            normalizedName = "sabao aaaa",
+            brand = null,
+            category = "Outros",
+            measureUnit = MeasureUnit.UNIT,
             netWeight = 1.0,
             source = "USER_SYNC",
-            occurrenceCount = 10L
+            occurrenceCount = 1L
         )
-        val noisyInvoiceItem = InvoiceItemResponseDto(
-            ean = "7891000100103",
-            name = "LEITE UHT INTEGRAL PIRACANJUBA TP 1L COD INTERNO 492019",
-            quantity = 12.0,
-            measureUnit = "UN"
-        )
-        whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.of(existingFromUser))
+        whenever(globalProductRepository.findByEan("7891000100103")).thenReturn(Optional.of(existingUserInitial))
         whenever(globalProductRepository.save(any<GlobalProductEntity>())).thenAnswer { it.arguments[0] }
 
-        val saved = globalProductService.ingestFromInvoiceItem(noisyInvoiceItem)
+        val saved = globalProductService.ingestFromExternalCatalog(
+            ExternalCatalogProduct(
+                ean = "7891000100103",
+                name = "Sabão A",
+                brand = "Marca Oficial",
+                measureUnit = MeasureUnit.GRAM,
+                netWeight = 500.0,
+                source = "OPEN_PRODUCTS_FACTS"
+            )
+        )
 
-        assertNotNull(saved)
-        assertEquals("Leite Integral Piracanjuba", saved!!.name)
-        assertEquals("USER_SYNC", saved.source)
-        assertEquals(11L, saved.occurrenceCount)
+        assertEquals("Sabão A", saved.name)
+        assertEquals("sabao a", saved.normalizedName)
+        assertEquals("Marca Oficial", saved.brand)
+        assertEquals(MeasureUnit.GRAM, saved.measureUnit)
+        assertEquals(500.0, saved.netWeight)
+        assertEquals("OPEN_PRODUCTS_FACTS", saved.source)
+        assertEquals(2L, saved.occurrenceCount)
     }
 
     @Test
-    fun `ingestFromUserProduct should enrich netWeight and measureUnit even when SEFAZ_INVOICE had non-UNIT measureUnit`() {
-        val existingFromSefaz = GlobalProductEntity(
-            id = "global-arroz",
-            ean = "7891111111111",
-            name = "ARROZ TIO JOAO 5KG",
-            normalizedName = "arroz tio joao 5kg",
-            brand = null,
-            category = "Geral",
-            measureUnit = MeasureUnit.KILOGRAM,
-            netWeight = 1.0,
-            source = "SEFAZ_INVOICE",
-            occurrenceCount = 2L
-        )
-        whenever(globalProductRepository.findByEan("7891111111111")).thenReturn(Optional.of(existingFromSefaz))
-        whenever(globalProductRepository.save(any<GlobalProductEntity>())).thenAnswer { it.arguments[0] }
-
-        val saved = globalProductService.ingestFromUserProduct(
-            ean = "7891111111111",
-            name = "Arroz Tio João Tipo 1",
-            brand = "Tio João",
-            category = "Alimentos",
-            measureUnit = MeasureUnit.KILOGRAM,
-            netWeight = 5.0
-        )
-
-        assertNotNull(saved)
-        assertEquals("Arroz Tio João Tipo 1", saved!!.name)
-        assertEquals("Tio João", saved.brand)
-        assertEquals("Outros", saved.category)
-        assertEquals(MeasureUnit.KILOGRAM, saved.measureUnit)
-        assertEquals(5.0, saved.netWeight)
-        assertEquals("USER_SYNC", saved.source)
-        assertEquals(3L, saved.occurrenceCount)
-    }
-
-    @Test
-    fun `searchProducts should return empty list for short query and delegate normalized and raw queries to repository`() {
+    fun `searchProducts should return empty list for short query and merge household overrides before canonical results`() {
         assertTrue(globalProductService.searchProducts("a", 20).isEmpty())
         verify(globalProductRepository, never()).searchProducts(any(), any(), any())
 
-        val entity = GlobalProductEntity(
+        val householdOverride = ProductEntity(
+            householdId = "house-a",
+            id = "prod-a",
+            ean = "7891000100103",
+            name = "Sabão AAAA",
+            category = "Limpeza",
+            brand = "Marca X"
+        )
+        val canonicalSameEan = GlobalProductEntity(
             id = "global-1",
             ean = "7891000100103",
-            name = "Café Pilão",
-            normalizedName = "cafe pilao",
-            brand = "Pilão"
+            name = "Sabão A",
+            normalizedName = "sabao a",
+            brand = "Marca X",
+            source = "OPEN_PRODUCTS_FACTS"
         )
-        whenever(globalProductRepository.searchProducts(eq("cafe"), eq("café"), eq(PageRequest.of(0, 50))))
-            .thenReturn(listOf(entity))
+        val canonicalOtherEan = GlobalProductEntity(
+            id = "global-2",
+            ean = "7891000100999",
+            name = "Sabão B",
+            normalizedName = "sabao b",
+            brand = "Marca Y",
+            source = "OPEN_PRODUCTS_FACTS"
+        )
 
-        val results = globalProductService.searchProducts("Café", 100)
+        whenever(householdService.requireHouseholdAccess("user-a", "house-a"))
+            .thenReturn(HouseholdContext("house-a", "user-a", HouseholdRole.OWNER))
+        whenever(productRepository.searchProducts("house-a", "Sabão"))
+            .thenReturn(listOf(householdOverride))
+        whenever(globalProductRepository.searchProducts(eq("sabao"), eq("sabão"), eq(PageRequest.of(0, 20))))
+            .thenReturn(listOf(canonicalSameEan, canonicalOtherEan))
 
-        assertEquals(1, results.size)
-        assertEquals("Café Pilão", results.first().name)
+        val results = globalProductService.searchProducts("Sabão", 20, userId = "user-a", householdId = "house-a")
+
+        assertEquals(2, results.size)
+        assertEquals("Sabão AAAA", results[0].name)
+        assertEquals("HOUSEHOLD_CATALOG", results[0].source)
+        assertEquals("Sabão B", results[1].name)
+        assertEquals("OPEN_PRODUCTS_FACTS", results[1].source)
     }
 }

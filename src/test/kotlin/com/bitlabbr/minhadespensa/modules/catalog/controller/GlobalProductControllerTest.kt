@@ -59,14 +59,14 @@ class GlobalProductControllerTest {
             ean = "7891000100103",
             name = "Leite Condensado Moça",
             brand = "Nestlé",
-            category = "Laticínios",
+            category = "Outros",
             measureUnit = MeasureUnit.GRAM,
             netWeight = 395.0,
-            source = "USER_SYNC",
+            source = "OPEN_FOOD_FACTS",
             occurrenceCount = 12L,
             updatedAt = 1730761200000L
         )
-        whenever(globalProductService.getProductByEan("7891000100103")).thenReturn(dto)
+        whenever(globalProductService.getProductByEan("7891000100103", "user-1", null)).thenReturn(dto)
 
         mockMvc.perform(
             get("/api/v1/catalog/global/7891000100103")
@@ -82,8 +82,35 @@ class GlobalProductControllerTest {
     }
 
     @Test
+    fun `GET product by EAN with X-Household-Id header should forward householdId to service`() {
+        val dto = GlobalProductResponseDto(
+            id = "prod-a",
+            ean = "7891000100103",
+            name = "Sabão AAAA",
+            brand = "Marca X",
+            category = "Limpeza",
+            measureUnit = MeasureUnit.GRAM,
+            netWeight = 500.0,
+            source = "HOUSEHOLD_CATALOG",
+            occurrenceCount = 1L,
+            updatedAt = 1730761200000L
+        )
+        whenever(globalProductService.getProductByEan("7891000100103", "user-1", "house-a")).thenReturn(dto)
+
+        mockMvc.perform(
+            get("/api/v1/catalog/global/7891000100103")
+                .header("X-Household-Id", "house-a")
+                .with(jwt().jwt { it.subject("user-1") })
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.name").value("Sabão AAAA"))
+            .andExpect(jsonPath("$.data.source").value("HOUSEHOLD_CATALOG"))
+    }
+
+    @Test
     fun `GET product by non-existent EAN should return 404 Not Found`() {
-        whenever(globalProductService.getProductByEan("7899999999999"))
+        whenever(globalProductService.getProductByEan("7899999999999", "user-1", null))
             .thenThrow(ResourceNotFoundException("Produto global não encontrado."))
 
         mockMvc.perform(
@@ -96,7 +123,7 @@ class GlobalProductControllerTest {
 
     @Test
     fun `GET product by invalid EAN should return 400 Bad Request`() {
-        whenever(globalProductService.getProductByEan("INVALID"))
+        whenever(globalProductService.getProductByEan("INVALID", "user-1", null))
             .thenThrow(ValidationException("Código EAN inválido"))
 
         mockMvc.perform(
@@ -122,14 +149,14 @@ class GlobalProductControllerTest {
             ean = "7891000100103",
             name = "Leite Condensado Moça",
             brand = "Nestlé",
-            category = "Laticínios",
+            category = "Outros",
             measureUnit = MeasureUnit.GRAM,
             netWeight = 395.0,
-            source = "USER_SYNC",
+            source = "OPEN_FOOD_FACTS",
             occurrenceCount = 12L,
             updatedAt = 1730761200000L
         )
-        whenever(globalProductService.searchProducts("Leite", 10)).thenReturn(listOf(dto))
+        whenever(globalProductService.searchProducts("Leite", 10, "user-1", null)).thenReturn(listOf(dto))
 
         mockMvc.perform(
             get("/api/v1/catalog/global/search")
