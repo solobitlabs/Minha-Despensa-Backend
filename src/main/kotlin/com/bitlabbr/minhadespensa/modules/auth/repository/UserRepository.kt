@@ -24,7 +24,11 @@
 package com.bitlabbr.minhadespensa.modules.auth.repository
 
 import com.bitlabbr.minhadespensa.modules.auth.entity.UserEntity
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import java.util.Optional
 
@@ -32,4 +36,21 @@ import java.util.Optional
 interface UserRepository : JpaRepository<UserEntity, String> {
     fun findByEmail(email: String): Optional<UserEntity>
     fun existsByEmail(email: String): Boolean
+    fun countByIsBlockedTrue(): Long
+
+    @Query(
+        """
+        SELECT u FROM UserEntity u
+        WHERE (:query = '' OR LOWER(u.name) LIKE CONCAT('%', :query, '%')
+               OR LOWER(u.email) LIKE CONCAT('%', :query, '%')
+               OR u.id = :query)
+          AND (:blocked IS NULL OR u.isBlocked = :blocked)
+        ORDER BY u.createdAt DESC
+        """
+    )
+    fun adminFindFiltered(
+        @Param("query") query: String,
+        @Param("blocked") blocked: Boolean?,
+        pageable: Pageable
+    ): Page<UserEntity>
 }
