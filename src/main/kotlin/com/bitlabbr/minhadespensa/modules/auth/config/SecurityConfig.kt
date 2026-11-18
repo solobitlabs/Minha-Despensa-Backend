@@ -37,10 +37,13 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtEncoder
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint
 import org.springframework.security.web.SecurityFilterChain
 import java.nio.charset.StandardCharsets
@@ -78,6 +81,21 @@ class SecurityConfig(
     }
 
     @Bean
+    fun jwtAuthenticationConverter(): JwtAuthenticationConverter {
+        val defaultConverter = JwtGrantedAuthoritiesConverter()
+        val converter = JwtAuthenticationConverter()
+        converter.setJwtGrantedAuthoritiesConverter { jwt ->
+            val authorities = defaultConverter.convert(jwt).toMutableSet()
+            val role = jwt.getClaimAsString("role")
+            if (!role.isNullOrBlank()) {
+                authorities.add(SimpleGrantedAuthority("ROLE_${role.trim().uppercase()}"))
+            }
+            authorities
+        }
+        return converter
+    }
+
+    @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { it.disable() }
@@ -98,13 +116,20 @@ class SecurityConfig(
                         "/support",
                         "/support/",
                         "/support/**",
-                        "/api/v1/support/auth/**"
+                        "/api/v1/support/auth/**",
+                        "/admin",
+                        "/admin/",
+                        "/admin/**",
+                        "/api/v1/admin/auth/login"
                     ).permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/v1/support/bug-reports").permitAll()
+                    .requestMatchers("/api/v1/admin/**").hasRole("SYSTEM_ADMIN")
                     .anyRequest().authenticated()
             }
             .oauth2ResourceServer { oauth2 ->
-                oauth2.jwt { }
+                oauth2.jwt { jwt ->
+                    jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())
+                }
                 val defaultEntryPoint = BearerTokenAuthenticationEntryPoint()
                 oauth2.authenticationEntryPoint { request, response, authException ->
                     val authHeader = request.getHeader("Authorization")

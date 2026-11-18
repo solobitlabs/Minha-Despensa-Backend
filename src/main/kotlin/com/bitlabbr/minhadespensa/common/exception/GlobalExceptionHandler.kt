@@ -103,6 +103,21 @@ class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse)
     }
 
+    @ExceptionHandler(TooManyRequestsException::class)
+    fun handleTooManyRequests(
+        ex: TooManyRequestsException,
+        request: HttpServletRequest
+    ): ResponseEntity<ErrorResponse> {
+        logger.warn("[429 Too Many Requests] at {}: {}", request.requestURI, ex.message)
+        val errorResponse = ErrorResponse(
+            status = HttpStatus.TOO_MANY_REQUESTS.value(),
+            error = HttpStatus.TOO_MANY_REQUESTS.reasonPhrase,
+            message = ex.message ?: "Too many requests",
+            path = request.requestURI
+        )
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(errorResponse)
+    }
+
     @ExceptionHandler(MissingRequestHeaderException::class)
     fun handleMissingRequestHeader(
         ex: MissingRequestHeaderException,

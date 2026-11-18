@@ -69,3 +69,10 @@ class UnauthorizedException(
 class ForbiddenException(
     message: String = "Acesso negado"
 ) : BusinessException(message)
+
+/**
+ * Exceção lançada quando o limite de tentativas é excedido (429 Too Many Requests).
+ */
+class TooManyRequestsException(
+    message: String = "Muitas tentativas. Tente novamente mais tarde."
+) : BusinessException(message)
