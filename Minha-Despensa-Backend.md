@@ -148,8 +148,8 @@ com.bitlabbr.minhadespensa
 ### 3.8. Catálogo Centralizado Global (`/api/v1/catalog/global`) — Requer Bearer Auth
 | Método | Endpoint | Descrição |
 | :--- | :--- | :--- |
-| `GET` | `/api/v1/catalog/global/{ean}` | Consulta metadados consolidados de um produto no catálogo centralizado por código EAN (8, 12, 13 ou 14 dígitos) |
-| `GET` | `/api/v1/catalog/global/search` | Busca paginada no catálogo global por nome normalizado, marca ou prefixo de EAN (`query`, `limit`) |
+| `GET` | `/api/v1/catalog/global/{ean}` | Consulta metadados por EAN (8, 12, 13 ou 14 dígitos). Aceita header opcional `X-Household-Id` para priorizar a versão customizada da casa; em miss, consulta `global_products` e faz fallback em cascata para Open Food / Beauty / Products Facts (cache write-through) |
+| `GET` | `/api/v1/catalog/global/search` | Busca paginada (`query`, `limit`) no catálogo global por nome normalizado, marca ou prefixo de EAN, mesclando e priorizando customizações da casa quando `X-Household-Id` é informado |
 
 ---
 
@@ -186,7 +186,7 @@ Quando um dispositivo envia um produto no Push:
 6. **Categorias (`product_categories`):** Processadas analogamente em `ProductCategoryService.upsertForSync`. A busca por `normalizedName` precede o ID; caso colida, registra o alias, desambigua o nome da obsoleta (`#deleted#id`) e retorna `categoryIdMappings`.
 7. **Integridade de Listas de Compras:** Itens de lista (`shopping_items`) sem a respectiva lista pai ou com `productId` inexistente na casa são rejeitados de forma graciosa em `SyncRejectedItemDto`, sem interromper o lote e evitando falhas de chave estrangeira no SQLite móvel.
 8. **Migration Flyway:** Os índices parciais únicos em `V1__init_multi_tenant_schema.sql` contêm `WHERE is_deleted = FALSE`, garantindo que produtos e categorias soft-deleted nunca bloqueiem novos cadastros com o mesmo EAN ou nome.
-9. **Catálogo Centralizado Global por EAN (`global_products`):** Alimentado organicamente e em transação independente (`REQUIRES_NEW`) pelas leituras de notas fiscais SEFAZ (`SEFAZ_INVOICE`) e sincronizações de produtos dos usuários (`USER_SYNC`). Gera `id` determinístico `UUIDv5` (`DeterministicIdUtils.productIdForEan`), fixa a categoria imutável `"Outros"` para evitar vazamento de categorias customizadas entre casas, não armazena mídia/fotos, bloqueia códigos internos de balança (EAN-13 prefixo `20..29`), converte siglas fiscais (`KG`, `LT`, `UN`, `PCT`) para `MeasureUnit` e enriquece marcas, pesos e nomes priorizando descrições curadas por usuários (`USER_SYNC`) sobre abreviações de nota fiscal.
+9. **Catálogo Centralizado Global por EAN (`global_products`):** Alimentado em transação independente (`REQUIRES_NEW`) por APIs públicas abertas em cascata (`OPEN_FOOD_FACTS` → `OPEN_BEAUTY_FACTS` → `OPEN_PRODUCTS_FACTS`), leituras de notas fiscais SEFAZ (`SEFAZ_INVOICE`) e criação inicial via `USER_SYNC` (apenas para EANs inéditos). Segue hierarquia estrita `OPEN_* > SEFAZ_INVOICE > USER_SYNC`: edições particulares de usuários (`USER_SYNC`) **nunca** sobrescrevem o dado canônico de outras famílias, ficando isoladas em `catalog_products` da respectiva casa. Gera `id` determinístico `UUIDv5`, fixa a categoria canônica `"Outros"`, não armazena mídia/fotos, bloqueia códigos internos de balança (`20..29`) e converte siglas fiscais para `MeasureUnit`.
 
 ---
 
