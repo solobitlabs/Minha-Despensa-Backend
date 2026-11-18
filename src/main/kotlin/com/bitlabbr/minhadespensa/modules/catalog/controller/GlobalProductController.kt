@@ -32,6 +32,10 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse as SwaggerApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.http.CacheControl
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.security.oauth2.jwt.Jwt
@@ -41,6 +45,7 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.util.concurrent.TimeUnit
 
 @RestController
 @RequestMapping("/api/v1/catalog/global")
@@ -107,5 +112,39 @@ class GlobalProductController(
             householdId = householdId
         )
         return ResponseEntity.ok(ApiResponse.ok(results))
+    }
+
+    @GetMapping("/{ean}/media")
+    @Operation(
+        summary = "Obter foto canônica do produto global",
+        description = "Retorna os bytes da imagem canônica do produto no catálogo global com suporte a cache ETag / 304 Not Modified."
+    )
+    @ApiResponses(
+        value = [
+            SwaggerApiResponse(responseCode = "200", description = "Imagem retornada com sucesso."),
+            SwaggerApiResponse(responseCode = "304", description = "Imagem não modificada (ETag correspondente)."),
+            SwaggerApiResponse(responseCode = "400", description = "Formato de código EAN inválido."),
+            SwaggerApiResponse(responseCode = "401", description = "Token JWT ausente ou expirado."),
+            SwaggerApiResponse(responseCode = "404", description = "Produto não possui foto canônica cadastrada.")
+        ]
+    )
+    fun getGlobalProductMedia(
+        @PathVariable ean: String,
+        @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) ifNoneMatch: String?
+    ): ResponseEntity<ByteArray> {
+        val media = globalProductService.getGlobalMedia(ean)
+        val eTag = "\"${media.sha256Hash}\""
+        val cleanIfNoneMatch = ifNoneMatch?.trim()?.removeSurrounding("\"")
+        if (cleanIfNoneMatch != null && cleanIfNoneMatch == media.sha256Hash) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED)
+                .eTag(eTag)
+                .build()
+        }
+
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(media.contentType))
+            .eTag(eTag)
+            .cacheControl(CacheControl.maxAge(7, TimeUnit.DAYS).cachePublic())
+            .body(media.imageBytes)
     }
 }
