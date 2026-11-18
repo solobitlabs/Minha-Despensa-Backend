@@ -56,6 +56,12 @@ data class GlobalProductResponseDto(
     @Schema(description = "Quantidade de vezes que este produto foi catalogado ou lido", example = "12")
     val occurrenceCount: Long,
 
+    @Schema(description = "Hash SHA-256 da foto canônica quando disponível", example = "a3f8...")
+    val imageHash: String? = null,
+
+    @Schema(description = "Indica se o produto foi sanitizado/verificado por um administrador", example = "true")
+    val isVerified: Boolean = false,
+
     @Schema(description = "Timestamp da última atualização (epoch millis)", example = "1730761200000")
     val updatedAt: Long
 ) {
@@ -71,6 +77,8 @@ data class GlobalProductResponseDto(
                 netWeight = entity.netWeight,
                 source = entity.source,
                 occurrenceCount = entity.occurrenceCount,
+                imageHash = entity.imageHash,
+                isVerified = entity.isVerified,
                 updatedAt = entity.updatedAt
             )
         }

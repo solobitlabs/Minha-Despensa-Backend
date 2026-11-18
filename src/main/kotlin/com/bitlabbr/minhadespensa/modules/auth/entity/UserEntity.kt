@@ -48,6 +48,12 @@ class UserEntity(
     @Column(name = "default_household_id", length = 36)
     var defaultHouseholdId: String? = null,
 
+    @Column(name = "is_blocked", nullable = false)
+    var isBlocked: Boolean = false,
+
+    @Column(name = "blocked_reason", length = 255)
+    var blockedReason: String? = null,
+
     @Column(name = "created_at", nullable = false)
     var createdAt: Long = System.currentTimeMillis(),
 
