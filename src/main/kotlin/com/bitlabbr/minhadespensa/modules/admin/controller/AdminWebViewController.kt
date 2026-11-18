@@ -700,9 +700,26 @@ class AdminWebViewController {
       document.getElementById("productModal").classList.add("hidden");
     });
 
+    document.getElementById("mPhotoFile").addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const box = document.getElementById("modalPhotoBox");
+      const img = document.getElementById("mPhotoPreview");
+      const empty = document.getElementById("mPhotoEmpty");
+      const originBadge = document.getElementById("mPhotoOrigin");
+      box.classList.remove("hidden");
+      img.src = URL.createObjectURL(file);
+      img.classList.remove("hidden");
+      empty.classList.add("hidden");
+      originBadge.textContent = "Nova foto selecionada (clique em Salvar)";
+      originBadge.className = "badge";
+      originBadge.classList.remove("hidden");
+    });
+
     document.getElementById("productForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const ean = document.getElementById("mEan").value.trim();
+      const fileInput = document.getElementById("mPhotoFile");
       const payload = {
         ean,
         name: document.getElementById("mName").value.trim(),
@@ -719,15 +736,22 @@ class AdminWebViewController {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
-          showNotice("Produto criado com sucesso.", false);
         } else {
           await apiFetch("/api/v1/admin/products/" + encodeURIComponent(ean), {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
-          showNotice("Produto sanitizado com sucesso.", false);
         }
+        if (fileInput.files && fileInput.files.length > 0) {
+          const fd = new FormData();
+          fd.append("file", fileInput.files[0]);
+          await apiFetch("/api/v1/admin/products/" + encodeURIComponent(ean) + "/media", {
+            method: "PUT",
+            body: fd
+          });
+        }
+        showNotice(isCreating ? "Produto criado com sucesso." : "Produto salvo com sucesso.", false);
         document.getElementById("productModal").classList.add("hidden");
         loadAll();
       } catch (err) {
