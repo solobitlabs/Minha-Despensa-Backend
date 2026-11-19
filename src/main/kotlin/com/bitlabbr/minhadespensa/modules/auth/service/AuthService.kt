@@ -148,6 +148,11 @@ class AuthService(
             throw UnauthorizedException("Invalid email or password")
         }
 
+        if (user.isBlocked) {
+            logger.warn("[Auth Login Blocked] Blocked user attempted login: email='{}' (userId={})", normalizedEmail, user.id)
+            throw com.bitlabbr.minhadespensa.common.exception.ForbiddenException("Conta bloqueada pelo administrador.")
+        }
+
         val activeHousehold = resolveActiveHouseholdSummary(user)
         val (accessToken, expiresInSeconds) = jwtTokenService.generateAccessToken(user)
         val rawRefreshToken = generateOpaqueToken()
@@ -194,6 +199,11 @@ class AuthService(
 
         val user = userRepository.findById(tokenEntity.userId)
             .orElseThrow { UnauthorizedException("User not found") }
+
+        if (user.isBlocked) {
+            logger.warn("[Auth Refresh Blocked] Blocked user attempted refresh: userId={}", user.id)
+            throw com.bitlabbr.minhadespensa.common.exception.ForbiddenException("Conta bloqueada pelo administrador.")
+        }
 
         // Rotaciona para um novo refresh token dentro da mesma família
         val newRawRefreshToken = generateOpaqueToken()

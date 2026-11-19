@@ -31,7 +31,9 @@ import com.bitlabbr.minhadespensa.modules.catalog.client.OpenFactsCatalogClient
 import com.bitlabbr.minhadespensa.modules.catalog.domain.MeasureUnit
 import com.bitlabbr.minhadespensa.modules.catalog.dto.GlobalProductResponseDto
 import com.bitlabbr.minhadespensa.modules.catalog.entity.GlobalProductEntity
+import com.bitlabbr.minhadespensa.modules.catalog.entity.GlobalProductMediaEntity
 import com.bitlabbr.minhadespensa.modules.catalog.entity.ProductEntity
+import com.bitlabbr.minhadespensa.modules.catalog.repository.GlobalProductMediaRepository
 import com.bitlabbr.minhadespensa.modules.catalog.repository.GlobalProductRepository
 import com.bitlabbr.minhadespensa.modules.catalog.repository.ProductRepository
 import com.bitlabbr.minhadespensa.modules.household.service.HouseholdService
@@ -51,12 +53,15 @@ class GlobalProductService(
     @Autowired(required = false)
     private val productRepository: ProductRepository? = null,
     @Autowired(required = false)
-    private val householdService: HouseholdService? = null
+    private val householdService: HouseholdService? = null,
+    @Autowired(required = false)
+    private val globalProductMediaRepository: GlobalProductMediaRepository? = null
 ) {
     private val logger = LoggerFactory.getLogger(GlobalProductService::class.java)
 
     companion object {
         const val FIXED_GLOBAL_CATEGORY = "Outros"
+        const val SOURCE_ADMIN_CURATED = "ADMIN_CURATED"
         const val SOURCE_USER_SYNC = "USER_SYNC"
         const val SOURCE_SEFAZ_INVOICE = "SEFAZ_INVOICE"
         const val SOURCE_HOUSEHOLD_CATALOG = "HOUSEHOLD_CATALOG"
@@ -97,10 +102,23 @@ class GlobalProductService(
 
     private fun sourcePriority(source: String): Int {
         return when {
+            source == SOURCE_ADMIN_CURATED -> 4
             source.startsWith("OPEN_") -> 3
             source == SOURCE_SEFAZ_INVOICE -> 2
             else -> 1
         }
+    }
+
+    @Transactional(readOnly = true)
+    fun getGlobalMedia(ean: String): GlobalProductMediaEntity {
+        val cleanEan = ean.trim()
+        if (!isValidEan(cleanEan)) {
+            throw ValidationException("Código EAN inválido: '$ean'.")
+        }
+        val repo = globalProductMediaRepository
+            ?: throw ResourceNotFoundException("Repositório de mídia global indisponível.")
+        return repo.findById(cleanEan)
+            .orElseThrow { ResourceNotFoundException("Foto canônica não encontrada para o EAN '$cleanEan'.") }
     }
 
     @Transactional
@@ -289,6 +307,16 @@ class GlobalProductService(
 
             val incomingPriority = sourcePriority(source)
             val existingPriority = sourcePriority(existing.source)
+
+            // Produtos curados/verificados por administrador nunca são sobrescritos por ingestão automática
+            if (existing.isVerified || existing.source == SOURCE_ADMIN_CURATED) {
+                logger.debug(
+                    "[Catalog:Global] Skipping auto-enrichment on admin-verified product EAN={} (occurrences={})",
+                    ean,
+                    existing.occurrenceCount
+                )
+                return globalProductRepository.save(existing)
+            }
 
             if (existing.brand.isNullOrBlank() && !brand.isNullOrBlank()) {
                 existing.brand = brand

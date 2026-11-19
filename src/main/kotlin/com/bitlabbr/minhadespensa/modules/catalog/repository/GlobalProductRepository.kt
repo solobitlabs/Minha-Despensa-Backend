@@ -24,6 +24,7 @@
 package com.bitlabbr.minhadespensa.modules.catalog.repository
 
 import com.bitlabbr.minhadespensa.modules.catalog.entity.GlobalProductEntity
+import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
@@ -37,6 +38,10 @@ interface GlobalProductRepository : JpaRepository<GlobalProductEntity, String> {
     fun findByEan(ean: String): Optional<GlobalProductEntity>
 
     fun existsByEan(ean: String): Boolean
+
+    fun countByIsVerifiedTrue(): Long
+
+    fun countByImageHashIsNotNull(): Long
 
     @Query(
         """
@@ -53,4 +58,23 @@ interface GlobalProductRepository : JpaRepository<GlobalProductEntity, String> {
         @Param("rawQuery") rawQuery: String,
         pageable: Pageable
     ): List<GlobalProductEntity>
+
+    @Query(
+        """
+        SELECT gp FROM GlobalProductEntity gp
+        WHERE (:query = '' OR gp.normalizedName LIKE CONCAT('%', :query, '%')
+               OR LOWER(COALESCE(gp.brand, '')) LIKE CONCAT('%', :rawQuery, '%')
+               OR gp.ean LIKE CONCAT('%', :rawQuery, '%'))
+          AND (:source = '' OR gp.source = :source)
+          AND (:verified IS NULL OR gp.isVerified = :verified)
+        ORDER BY gp.isVerified ASC, gp.occurrenceCount DESC, gp.updatedAt DESC
+        """
+    )
+    fun adminFindFiltered(
+        @Param("query") query: String,
+        @Param("rawQuery") rawQuery: String,
+        @Param("source") source: String,
+        @Param("verified") verified: Boolean?,
+        pageable: Pageable
+    ): Page<GlobalProductEntity>
 }

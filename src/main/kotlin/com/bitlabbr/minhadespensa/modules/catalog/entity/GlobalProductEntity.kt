@@ -76,6 +76,12 @@ class GlobalProductEntity(
     @Column(name = "occurrence_count", nullable = false)
     var occurrenceCount: Long = 1L,
 
+    @Column(name = "image_hash", length = 64, nullable = true)
+    var imageHash: String? = null,
+
+    @Column(name = "is_verified", nullable = false)
+    var isVerified: Boolean = false,
+
     @Column(name = "created_at", nullable = false)
     var createdAt: Long = System.currentTimeMillis(),
 

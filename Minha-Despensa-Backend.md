@@ -150,6 +150,22 @@ com.bitlabbr.minhadespensa
 | :--- | :--- | :--- |
 | `GET` | `/api/v1/catalog/global/{ean}` | Consulta metadados por EAN (8, 12, 13 ou 14 dígitos). Aceita header opcional `X-Household-Id` para priorizar a versão customizada da casa; em miss, consulta `global_products` e faz fallback em cascata para Open Food / Beauty / Products Facts (cache write-through) |
 | `GET` | `/api/v1/catalog/global/search` | Busca paginada (`query`, `limit`) no catálogo global por nome normalizado, marca ou prefixo de EAN, mesclando e priorizando customizações da casa quando `X-Household-Id` é informado |
+| `GET` | `/api/v1/catalog/global/{ean}/media` | Download da foto canônica do produto global (com suporte a ETag / `304 Not Modified`) |
+
+### 3.9. Console Administrativo Web (`/admin` & `/api/v1/admin`) — Requer `ROLE_SYSTEM_ADMIN`
+| Método | Endpoint | Descrição |
+| :--- | :--- | :--- |
+| `GET` | `/admin` | Interface Web SPA administrativa (CSP estrita, `X-Frame-Options: DENY`, Dark Glassmorphism) para sanitização de produtos, fotos canônicas, usuários e auditoria |
+| `POST` | `/api/v1/admin/auth/login` | Login administrativo com rate limiter anti brute-force (HTTP 429 após 5 falhas) emitindo JWT `SYSTEM_ADMIN` |
+| `GET` | `/api/v1/admin/dashboard` | KPIs consolidados (produtos canônicos, verificados, com foto, usuários ativos/bloqueados, casas) |
+| `GET`, `POST` | `/api/v1/admin/products` | Listagem paginada/filtrada e criação manual de produto canônico (`ADMIN_CURATED`) |
+| `PUT`, `DELETE` | `/api/v1/admin/products/{ean}` | Sanitização/edição canônica (protegida contra sobrescrita automática) ou remoção |
+| `POST` | `/api/v1/admin/products/{ean}/enrich` | Re-enriquecimento sob demanda via Open Facts |
+| `PUT`, `DELETE` | `/api/v1/admin/products/{ean}/media` | Upload (validado por magic bytes WebP/JPEG/PNG até 500KB) ou remoção de foto canônica |
+| `GET` | `/api/v1/admin/users`, `/{id}` | Listagem paginada e detalhes de usuários e casas associadas |
+| `PATCH` | `/api/v1/admin/users/{id}/block` | Bloqueio/desbloqueio de conta com motivo e revogação imediata de sessões |
+| `POST` | `/api/v1/admin/users/{id}/revoke-sessions` | Revogação forçada de todos os `refresh_tokens` do usuário |
+| `GET` | `/api/v1/admin/audit-logs` | Consulta à trilha imutável de auditoria administrativa (`admin_audit_logs`) |
 
 ---
 
@@ -203,7 +219,7 @@ flowchart LR
 - **DNS / Domínio:** `https://despensa.solobit.com.br` (legado interno: `https://despensa.domus.arpa`)
 - **Proxy Reverso:** Traefik v3.0 escutando em `websecure` (:443) com roteamento para `http://despensa_api:8080`.
 - **Banco de Dados:** PostgreSQL 15 (`despensa_user` / `despensa`).
-- **Migrações:** Flyway (`V1__init_multi_tenant_schema.sql`, `V2__init_support_and_bug_reports.sql`, `V3__init_global_catalog_schema.sql`).
+- **Migrações:** Flyway (`V1__init_multi_tenant_schema.sql`, `V2__init_support_and_bug_reports.sql`, `V3__init_global_catalog_schema.sql`, `V4__init_admin_and_global_media.sql`).
 - **Armazenamento de Arquivos:** Volumes persistentes `./releases:/app/releases` (APKs OTA) e `./bug-reports:/app/bug-reports` (logs de diagnóstico e metadados).
 
 ---
