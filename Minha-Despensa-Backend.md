@@ -1,8 +1,8 @@
 # Minha Despensa Backend — Arquitetura, Domínios & Operação
 
-> **Versão:** 2.2.1  
-> **Última Atualização:** 05/11/2026  
-> **Ambiente de Produção:** Domus Home Server (`https://despensa.domus.arpa`)  
+> **Versão:** 2.3.0  
+> **Última Atualização:** 18/11/2026  
+> **Ambiente de Produção:** Domus Home Server (`https://despensa.solobit.com.br`)  
 > **Repositório:** `Minha-Despensa-Backend`  
 > **Cliente Integrado:** [Minha-Dispensa (Compose Multiplatform / Room)](../Minha-Dispensa)
 
@@ -23,7 +23,7 @@ flowchart TD
     end
 
     subgraph Network["Infraestrutura Domus (Tailscale + Traefik)"]
-        Traefik["Traefik v3.0 (Reverse Proxy)<br/>https://despensa.domus.arpa"]
+        Traefik["Traefik v3.0 (Reverse Proxy)<br/>https://despensa.solobit.com.br"]
     end
 
     subgraph Backend["Minha Despensa Backend (Spring Boot 4 / Kotlin)"]
@@ -148,8 +148,8 @@ com.bitlabbr.minhadespensa
 ### 3.8. Catálogo Centralizado Global (`/api/v1/catalog/global`) — Requer Bearer Auth
 | Método | Endpoint | Descrição |
 | :--- | :--- | :--- |
-| `GET` | `/api/v1/catalog/global/{ean}` | Consulta metadados consolidados de um produto no catálogo centralizado por código EAN (8, 12, 13 ou 14 dígitos) |
-| `GET` | `/api/v1/catalog/global/search` | Busca paginada no catálogo global por nome normalizado, marca ou prefixo de EAN (`query`, `limit`) |
+| `GET` | `/api/v1/catalog/global/{ean}` | Consulta metadados por EAN (8, 12, 13 ou 14 dígitos). Aceita header opcional `X-Household-Id` para priorizar a versão customizada da casa; em miss, consulta `global_products` e faz fallback em cascata para Open Food / Beauty / Products Facts (cache write-through) |
+| `GET` | `/api/v1/catalog/global/search` | Busca paginada (`query`, `limit`) no catálogo global por nome normalizado, marca ou prefixo de EAN, mesclando e priorizando customizações da casa quando `X-Household-Id` é informado |
 
 ---
 
@@ -186,7 +186,7 @@ Quando um dispositivo envia um produto no Push:
 6. **Categorias (`product_categories`):** Processadas analogamente em `ProductCategoryService.upsertForSync`. A busca por `normalizedName` precede o ID; caso colida, registra o alias, desambigua o nome da obsoleta (`#deleted#id`) e retorna `categoryIdMappings`.
 7. **Integridade de Listas de Compras:** Itens de lista (`shopping_items`) sem a respectiva lista pai ou com `productId` inexistente na casa são rejeitados de forma graciosa em `SyncRejectedItemDto`, sem interromper o lote e evitando falhas de chave estrangeira no SQLite móvel.
 8. **Migration Flyway:** Os índices parciais únicos em `V1__init_multi_tenant_schema.sql` contêm `WHERE is_deleted = FALSE`, garantindo que produtos e categorias soft-deleted nunca bloqueiem novos cadastros com o mesmo EAN ou nome.
-9. **Catálogo Centralizado Global por EAN (`global_products`):** Alimentado organicamente e em transação independente (`REQUIRES_NEW`) pelas leituras de notas fiscais SEFAZ (`SEFAZ_INVOICE`) e sincronizações de produtos dos usuários (`USER_SYNC`). Gera `id` determinístico `UUIDv5` (`DeterministicIdUtils.productIdForEan`), fixa a categoria imutável `"Outros"` para evitar vazamento de categorias customizadas entre casas, não armazena mídia/fotos, bloqueia códigos internos de balança (EAN-13 prefixo `20..29`), converte siglas fiscais (`KG`, `LT`, `UN`, `PCT`) para `MeasureUnit` e enriquece marcas, pesos e nomes priorizando descrições curadas por usuários (`USER_SYNC`) sobre abreviações de nota fiscal.
+9. **Catálogo Centralizado Global por EAN (`global_products`):** Alimentado em transação independente (`REQUIRES_NEW`) por APIs públicas abertas em cascata (`OPEN_FOOD_FACTS` → `OPEN_BEAUTY_FACTS` → `OPEN_PRODUCTS_FACTS`), leituras de notas fiscais SEFAZ (`SEFAZ_INVOICE`) e criação inicial via `USER_SYNC` (apenas para EANs inéditos). Segue hierarquia estrita `OPEN_* > SEFAZ_INVOICE > USER_SYNC`: edições particulares de usuários (`USER_SYNC`) **nunca** sobrescrevem o dado canônico de outras famílias, ficando isoladas em `catalog_products` da respectiva casa. Gera `id` determinístico `UUIDv5`, fixa a categoria canônica `"Outros"`, não armazena mídia/fotos, bloqueia códigos internos de balança (`20..29`) e converte siglas fiscais para `MeasureUnit`.
 
 ---
 
@@ -194,13 +194,13 @@ Quando um dispositivo envia um produto no Push:
 
 ```mermaid
 flowchart LR
-    Tailscale["Tailscale Mesh VPN<br/>(*.domus.arpa)"] --> Traefik["Traefik v3.0 Container<br/>(:80, :443)"]
-    Traefik -- "despensa.domus.arpa (HTTPS)" --> DespensaApp["Container: despensa_api<br/>(Spring Boot :8080)"]
+    Tailscale["Tailscale Mesh VPN / Cloud<br/>(*.solobit.com.br)"] --> Traefik["Traefik v3.0 Container<br/>(:80, :443)"]
+    Traefik -- "despensa.solobit.com.br (HTTPS)" --> DespensaApp["Container: despensa_api<br/>(Spring Boot :8080)"]
     DespensaApp -- "traefik_proxy network" --> Postgres["Container: postgres<br/>(PostgreSQL 15 :5432)"]
 ```
 
 - **Host SSH:** `domus-vpn` (`100.98.199.97`, usuário `willjsan`)
-- **DNS / Domínio:** `https://despensa.domus.arpa`
+- **DNS / Domínio:** `https://despensa.solobit.com.br` (legado interno: `https://despensa.domus.arpa`)
 - **Proxy Reverso:** Traefik v3.0 escutando em `websecure` (:443) com roteamento para `http://despensa_api:8080`.
 - **Banco de Dados:** PostgreSQL 15 (`despensa_user` / `despensa`).
 - **Migrações:** Flyway (`V1__init_multi_tenant_schema.sql`, `V2__init_support_and_bug_reports.sql`, `V3__init_global_catalog_schema.sql`).
@@ -220,7 +220,7 @@ O fluxo de implantação no servidor `domus` segue o roteiro padronizado de 5 et
 ./gradlew bootJar -x test
 
 # 3. Transferir o artefato para o servidor via SSH/SCP
-scp build/libs/Minha-Despensa-Backend-2.2.1-SNAPSHOT.jar domus-vpn:~/domus/docker/apps/despensa/app.jar
+scp build/libs/Minha-Despensa-Backend-2.3.0-SNAPSHOT.jar domus-vpn:~/domus/docker/apps/despensa/app.jar
 
 # 4. Reconstruir a imagem Docker e reiniciar o container (volumes ./releases:/app/releases e ./bug-reports:/app/bug-reports mapeados)
 ssh domus-vpn "cd /home/willjsan/domus/docker/apps/despensa && docker compose up -d --build"

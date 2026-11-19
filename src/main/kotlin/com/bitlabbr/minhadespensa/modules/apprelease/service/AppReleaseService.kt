@@ -39,7 +39,7 @@ import java.security.MessageDigest
 class AppReleaseService(
     @Value("\${app.releases.storage-path:/app/releases}")
     private val storagePath: String,
-    @Value("\${app.releases.base-download-url:https://despensa.domus.arpa/api/v1/app/download}")
+    @Value("\${app.releases.base-download-url:https://despensa.solobit.com.br/api/v1/app/download}")
     private val baseDownloadUrl: String,
     private val objectMapper: ObjectMapper
 ) {

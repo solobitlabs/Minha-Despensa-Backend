@@ -33,8 +33,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -48,38 +51,61 @@ class GlobalProductController(
 ) {
 
     @GetMapping("/{ean}")
-    @Operation(summary = "Consultar produto global por EAN", description = "Retorna os metadados consolidados de um produto cadastrado no catálogo central por código de barras.")
+    @Operation(
+        summary = "Consultar produto global por EAN",
+        description = "Retorna os metadados do produto por código de barras. Quando X-Household-Id é informado e a casa já possui o produto, retorna a versão customizada da casa; caso contrário, consulta o catálogo canônico global e bases públicas Open Facts."
+    )
     @ApiResponses(
         value = [
             SwaggerApiResponse(responseCode = "200", description = "Produto localizado com sucesso."),
             SwaggerApiResponse(responseCode = "400", description = "Formato de código EAN inválido."),
             SwaggerApiResponse(responseCode = "401", description = "Token JWT ausente ou expirado."),
-            SwaggerApiResponse(responseCode = "404", description = "Produto não localizado no catálogo central.")
+            SwaggerApiResponse(responseCode = "403", description = "Usuário sem acesso à casa informada em X-Household-Id."),
+            SwaggerApiResponse(responseCode = "404", description = "Produto não localizado no catálogo central nem nas bases externas.")
         ]
     )
     fun getProductByEan(
         @Parameter(description = "Código de barras universal EAN (8, 12, 13 ou 14 dígitos)", example = "7891000100103")
-        @PathVariable ean: String
+        @PathVariable ean: String,
+        @Parameter(description = "ID opcional da casa para priorizar customizações locais do usuário")
+        @RequestHeader(name = "X-Household-Id", required = false) householdId: String?,
+        @AuthenticationPrincipal jwt: Jwt?
     ): ResponseEntity<ApiResponse<GlobalProductResponseDto>> {
-        val product = globalProductService.getProductByEan(ean)
+        val product = globalProductService.getProductByEan(
+            ean = ean,
+            userId = jwt?.subject,
+            householdId = householdId
+        )
         return ResponseEntity.ok(ApiResponse.ok(product))
     }
 
     @GetMapping("/search")
-    @Operation(summary = "Pesquisar produtos no catálogo global", description = "Realiza busca aproximada no catálogo centralizado por nome, marca ou início de código EAN.")
+    @Operation(
+        summary = "Pesquisar produtos no catálogo global",
+        description = "Realiza busca aproximada por nome, marca ou início de código EAN, priorizando produtos customizados da casa quando X-Household-Id é informado."
+    )
     @ApiResponses(
         value = [
             SwaggerApiResponse(responseCode = "200", description = "Lista de produtos localizados."),
-            SwaggerApiResponse(responseCode = "401", description = "Token JWT ausente ou expirado.")
+            SwaggerApiResponse(responseCode = "401", description = "Token JWT ausente ou expirado."),
+            SwaggerApiResponse(responseCode = "403", description = "Usuário sem acesso à casa informada em X-Household-Id.")
         ]
     )
     fun searchProducts(
         @Parameter(description = "Termo de busca (mínimo de 2 caracteres)", example = "Leite")
         @RequestParam(name = "query") query: String,
         @Parameter(description = "Limite máximo de registros a retornar (entre 1 e 50)", example = "20")
-        @RequestParam(name = "limit", defaultValue = "20") limit: Int
+        @RequestParam(name = "limit", defaultValue = "20") limit: Int,
+        @Parameter(description = "ID opcional da casa para priorizar customizações locais do usuário")
+        @RequestHeader(name = "X-Household-Id", required = false) householdId: String?,
+        @AuthenticationPrincipal jwt: Jwt?
     ): ResponseEntity<ApiResponse<List<GlobalProductResponseDto>>> {
-        val results = globalProductService.searchProducts(query, limit)
+        val results = globalProductService.searchProducts(
+            query = query,
+            limit = limit,
+            userId = jwt?.subject,
+            householdId = householdId
+        )
         return ResponseEntity.ok(ApiResponse.ok(results))
     }
 }

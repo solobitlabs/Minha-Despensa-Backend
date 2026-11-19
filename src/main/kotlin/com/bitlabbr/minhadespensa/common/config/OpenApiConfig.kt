@@ -69,6 +69,7 @@ class OpenApiConfig(
             )
             .servers(
                 listOf(
+                    Server().url("https://despensa.solobit.com.br").description("Produção SoloBit (HTTPS)"),
                     Server().url("https://despensa.domus.arpa").description("Produção Domus (Tailscale HTTPS)"),
                     Server().url("http://localhost:8080").description("Servidor Local de Desenvolvimento")
                 )

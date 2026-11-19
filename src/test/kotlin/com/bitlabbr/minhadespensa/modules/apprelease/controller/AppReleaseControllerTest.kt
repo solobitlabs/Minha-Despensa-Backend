@@ -61,7 +61,7 @@ class AppReleaseControllerTest {
             versionCode = 2100L,
             minRequiredVersion = 2000L,
             releaseNotes = "Nova atualização OTA.",
-            downloadUrl = "https://despensa.domus.arpa/api/v1/app/download/latest",
+            downloadUrl = "https://despensa.solobit.com.br/api/v1/app/download/latest",
             sha256Checksum = "1234567890abcdef",
             fileSizeInBytes = 25000000L,
             releasedAt = 1792771200000L
@@ -75,7 +75,7 @@ class AppReleaseControllerTest {
             .andExpect(jsonPath("$.data.platform").value("android"))
             .andExpect(jsonPath("$.data.versionName").value("2.1.0"))
             .andExpect(jsonPath("$.data.versionCode").value(2100))
-            .andExpect(jsonPath("$.data.downloadUrl").value("https://despensa.domus.arpa/api/v1/app/download/latest"))
+            .andExpect(jsonPath("$.data.downloadUrl").value("https://despensa.solobit.com.br/api/v1/app/download/latest"))
     }
 
     @Test
